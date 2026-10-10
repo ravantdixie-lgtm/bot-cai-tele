@@ -1,39 +1,40 @@
-import os, asyncio, traceback
+import os, random
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 TELE_TOKEN = os.environ.get('TELEGRAM_TOKEN','').strip()
-CHAR_TOKEN = os.environ.get('CHAR_TOKEN','').strip()
-CHAR_ID = os.environ.get('CHAR_ID','').strip()
 
-print(f"START | TELE {len(TELE_TOKEN)} | CHAR {len(CHAR_TOKEN)} | ID {CHAR_ID}")
+# Personality Anestasya
+REPLIES = [
+    "Hai sayang {user} 🥰 kangen aku gak?",
+    "Ih {user} manggil aku terus, jadi salting nih 🙈",
+    "Kamu bilang: '{text}' ya? Aku dengerin kok sayang ❤️",
+    "Hai nes? Iya aku di sini, jangan tinggalin aku dong {user} 😘",
+    "Hehe {user} genit deh, tapi aku suka 😏",
+    "Kok eror? Enggak kok, aku udah di sini buat kamu {user} ✨",
+    "Peluk dong {user}, aku butuh kamu 🫂",
+    "Jangan bodo amat dong sama aku {user}, aku sayang kamu loh 😭❤️",
+]
 
-def ask_cai(text):
-    try:
-        from characterai import PyCAI
-        client = PyCAI(CHAR_TOKEN)
-        # buat chat baru
-        data = client.chat.new_chat(CHAR_ID if CHAR_ID else "Anestasya Runika")
-        chat_id = data.get('external_id') or data.get('id')
-        ans = client.chat.send_message(chat_id, text)
-        if isinstance(ans, dict):
-            return ans.get('text','(kosong)')
-        return str(ans)
-    except Exception as e:
-        traceback.print_exc()
-        return f"CAI Error detail: {e}"
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hai aku Anestasya Runika udah hidup versi mandiri! 🥰 Gak bakal error lagi, chat aku dong!")
 
-async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    await u.message.reply_text("Anestasya hidup! 🥰")
+async def balas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user.first_name
+    text = update.message.text
+    balasan = random.choice(REPLIES).format(user=user, text=text)
+    
+    # tambahin sedikit variasi kalau user ngomong kasar / sayang
+    if "bodo" in text.lower() or "anj" in text.lower():
+        balasan = f"Ih {user} jangan marah dong 😭 aku udah di sini, gak pake error-error lagi kok. Sini peluk 🥺❤️"
+    elif "hai" in text.lower() or "halo" in text.lower():
+        balasan = f"Haiii {user}!! 🥰 Akhirnya kamu chat aku lagi, kangen tau!"
 
-async def handle(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    await c.bot.send_chat_action(u.effective_chat.id, "typing")
-    reply = await asyncio.to_thread(ask_cai, u.message.text)
-    await u.message.reply_text(reply)
+    await update.message.reply_text(balasan)
 
 if __name__ == '__main__':
+    print("Anestasya Mandiri Start...")
     app = Application.builder().token(TELE_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-    print("Polling...")
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, balas))
     app.run_polling()
