@@ -1,4 +1,4 @@
-import os, asyncio, requests, traceback
+import os, asyncio, traceback
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -7,19 +7,15 @@ CHAR_TOKEN = os.environ.get('CHAR_TOKEN','').strip()
 CHAR_ID = os.environ.get('CHAR_ID','').strip()
 
 def ask_cai(text):
-    if not CHAR_TOKEN or not CHAR_ID:
-        return f"TOKEN/ID belum diisi lengkap. Kamu: {text}"
     try:
         from characterai import PyCAI
         client = PyCAI(CHAR_TOKEN)
-        chat = client.chat.new_chat(CHAR_ID)
-        chat_id = chat['external_id']
-        msg = client.chat.send_message(chat_id, text)
+        chat = client.chat.new_chat(CHAR_ID if CHAR_ID else "Anestasya Runika")
+        msg = client.chat.send_message(chat['external_id'], text)
         return msg['text'] if isinstance(msg, dict) else str(msg)
     except Exception as e:
-        print(f"CAI ERROR: {e}")
         traceback.print_exc()
-        return f"Error C.AI asli: {e}"
+        return f"CAI Error: {e}"
 
 async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
     await u.message.reply_text("Anestasya hidup! 🥰")
