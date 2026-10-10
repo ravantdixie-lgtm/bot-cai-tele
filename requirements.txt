@@ -1,4 +1,4 @@
 python-telegram-bot==20.7
-characterai
+characterai==1.0.5
 websockets==10.4
-aiohttp==3.9.5
+aiohttp
