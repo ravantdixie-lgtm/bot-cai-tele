@@ -25,3 +25,4 @@ if __name__ == '__main__':
     app = Application.builder().token(TELE_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, balas))
     app.run_polling()
+    
