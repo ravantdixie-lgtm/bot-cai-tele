@@ -23,6 +23,3 @@ app = Application.builder().token(TELEGRAM_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, balas))
 print("Bot Railway jalan...")
 app.run_polling()
-
-python-telegram-bot
-characterai
