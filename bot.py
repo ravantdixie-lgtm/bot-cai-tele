@@ -1,89 +1,69 @@
 import os
-import re
 import asyncio
-import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from characterai import PyCAI
 
-# --- AMBIL TOKEN ---
 TELE_TOKEN = os.environ.get('TELEGRAM_TOKEN','').strip()
 CHAR_TOKEN = os.environ.get('CHAR_TOKEN','').strip()
-CHAR_ID = os.environ.get('CHAR_ID','').strip()  # optional
 
-logging.basicConfig(level=logging.INFO)
+print(f"TELE len: {len(TELE_TOKEN) if TELE_TOKEN else 0} | CHAR len: {len(CHAR_TOKEN) if CHAR_TOKEN else 0}")
 
-# --- SETUP C.AI ---
-cai_client = PyCAI(CHAR_TOKEN) if CHAR_TOKEN else None
-chat_obj = None
-participant = None
+# Setup CAI - sync client
+cai = None
+chat_id = None
+TARGET_CHAR = "0h9y5y9j6sJv9h9x9x9x9" # Nanti kita isi setelah tau ID, untuk sekarang pakai search
 
-async def init_cai():
-    global chat_obj, participant
+if CHAR_TOKEN:
     try:
-        if not cai_client:
-            print("CHAR_TOKEN kosong!")
-            return
-        # Ganti CHAR_ID kalau kamu punya ID karakter Anestasya, kalau kosong pakai search
-        char = CHAR_ID if CHAR_ID else "Anestasya Runika" 
-        print(f"Connect ke C.AI: {char}...")
-        data = await cai_client.chat.get_chat(char) if CHAR_ID else await cai_client.chat.get_chat("Anestasya Runika")
-        # cara baru characterai 0.8.0
-        # Jika gagal, coba new_chat
-        chat_obj = data
-        print("C.AI Connected!")
+        cai = PyCAI(CHAR_TOKEN)
+        print("PyCAI client dibuat")
     except Exception as e:
-        print(f"Gagal init C.AI: {e}")
-        chat_obj = None
+        print(f"Gagal buat PyCAI: {e}")
 
-async def ask_cai(text: str) -> str:
-    global chat_obj
+async def get_cai_reply(text: str):
+    if not cai:
+        return "CHAR_TOKEN belum diisi di Railway, sayang..."
     try:
-        if not chat_obj:
-            await init_cai()
+        # jalanin yang sync di thread biar gak nge-block
+        def do_chat():
+            # Coba pakai char yang udah di-set di ENV CHAR_ID kalau ada
+            char = os.environ.get('CHAR_ID','').strip() or "Anestasya Runika"
+            # Buat chat baru tiap sesi biar aman
+            # 0.8.0 API: new_chat
+            try:
+                chat = cai.chat.new_chat(char)
+                chat_uuid = chat['external_id']
+            except:
+                # fallback kalau char adalah ID
+                chat_uuid = char
+            
+            resp = cai.chat.send_message(chat_uuid, text)
+            # resp bisa dict
+            if isinstance(resp, dict):
+                return resp.get('text', str(resp))
+            return str(resp)
         
-        # Kirim pesan
-        # Untuk PyCAI 0.8.0
-        response = await cai_client.chat.send_message(
-            chat_obj['external_id'] if isinstance(chat_obj, dict) else chat_obj,
-            text
-        )
-        # bersihin text
-        ans = response.get('text', str(response))
-        # hapus ( ) action kalau mau lebih natural, biarin aja kalau mau tetap
-        return ans
+        reply = await asyncio.to_thread(do_chat)
+        return reply
     except Exception as e:
-        print(f"Error C.AI: {e}")
-        return f" (Aku lagi pusing bentar... error: {e})"
+        print(f"CAI Error: {e}")
+        return f"Aduh error di C.AI ku: {e} - coba lagi ya"
 
-# --- TELEGRAM HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hai aku Anestasya Runika udah hidup! 🥰 Chat aja aku.")
+    await update.message.reply_text("Hai aku Anestasya Runika udah hidup! 🥰")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    print(f"User: {user_text}")
-    
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    
-    reply = await ask_cai(user_text)
-    
+    reply = await get_cai_reply(update.message.text)
     await update.message.reply_text(reply)
 
 if __name__ == '__main__':
     if not TELE_TOKEN:
-        raise ValueError("TELEGRAM_TOKEN kosong!")
-    
-    print(f"Bot jalan... Token len: {len(TELE_TOKEN)}")
-    
-    # init loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(init_cai())
-    
+        print("TELEGRAM_TOKEN KOSONG!")
+        exit(1)
     app = Application.builder().token(TELE_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    print("Polling Telegram...")
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+    print("Bot jalan polling...")
     app.run_polling()
