@@ -1,90 +1,97 @@
 import os
-import asyncio
-import traceback
+import requests
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
 
 TELE_TOKEN = os.environ.get('TELEGRAM_TOKEN','').strip()
 CHAR_TOKEN = os.environ.get('CHAR_TOKEN','').strip()
+CHAR_ID = os.environ.get('CHAR_ID','').strip() or "Anestasya Runika" # isi ID karakter kalau punya
 
-print(f"START | TELE: {len(TELE_TOKEN)} | CHAR: {len(CHAR_TOKEN)}")
+print(f"Bot start | TELE: {len(TELE_TOKEN)} | CHAR_TOKEN: {len(CHAR_TOKEN) if CHAR_TOKEN else 0}")
 
-# Coba import CAI, kalau gagal bot tetep jalan
-try:
-    from characterai import PyCAI
-    CAI_AVAILABLE = True
-    print("characterai lib OK")
-except Exception as e:
-    CAI_AVAILABLE = False
-    print(f"characterai lib GAGAL: {e}")
+# --- Fungsi Chat ke Character AI pakai requests ---
+def ask_anestasya(text: str) -> str:
+    if not CHAR_TOKEN:
+        return f"(CHAR_TOKEN kosong) Kamu bilang: {text}"
 
-cai_client = None
-if CAI_AVAILABLE and CHAR_TOKEN:
     try:
-        cai_client = PyCAI(CHAR_TOKEN)
-        print("PyCAI client OK")
-    except Exception as e:
-        print(f"PyCAI init gagal: {e}")
-        cai_client = None
+        headers = {
+            "Authorization": f"Token {CHAR_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        # Step 1: Buat / lanjut chat (pakai endpoint beta)
+        # Ini endpoint yang dipakai PyCAI di dalamnya
+        # Kalau CHAR_ID masih nama, kita coba search dulu via API chat
+        # Untuk simpel, kita pakai endpoint histories
 
-async def get_reply(text: str):
-    if not cai_client:
-        return f"Kamu bilang: {text} (CAI lagi off, tapi bot Telegram ku hidup!)"
-    try:
-        def sync_call():
+        # Buat chat baru
+        create_url = "https://beta.character.ai/chat/history/create/"
+        payload = {
+            "character": CHAR_ID,
+            "tgt": CHAR_ID,
+            "history_external_id": None
+        }
+        # Coba beberapa format, kalau gagal fallback ke echo
+        try:
+            r = requests.post(create_url, json={"character": CHAR_ID}, headers=headers, timeout=15)
+            # print(r.text[:200])
+            data = r.json()
+            hist_id = data.get('external_id') or data.get('id') or data.get('history_external_id')
+        except:
+            hist_id = None
+
+        if not hist_id:
+            # kalau gagal create, coba langsung send dengan char name sebagai history
+            hist_id = CHAR_ID
+
+        # Step 2: Kirim pesan
+        send_url = "https://beta.character.ai/chat/history/msgs/create/"
+        # atau /chat/history/msgs/send/
+        # Coba 2 endpoint
+        for url in [
+            "https://beta.character.ai/chat/history/msgs/create/",
+            "https://beta.character.ai/chat/history/msgs/send/"
+        ]:
             try:
-                # coba new chat dengan search name
-                chat = cai_client.chat.new_chat(os.environ.get('CHAR_ID','').strip() or "Anestasya Runika")
-                chat_id = chat.get('external_id', chat.get('id'))
-                msg = cai_client.chat.send_message(chat_id, text)
-                if isinstance(msg, dict):
-                    return msg.get('text', str(msg))
-                return str(msg)
-            except Exception as inner:
-                traceback.print_exc()
-                return f"Error CAI: {inner}"
+                resp = requests.post(url, json={
+                    "history_external_id": hist_id,
+                    "character": CHAR_ID,
+                    "tgt": CHAR_ID,
+                    "text": text,
+                    "type": "TYPE_ONE_ON_ONE"
+                }, headers=headers, timeout=20)
+                if resp.status_code == 200:
+                    j = resp.json()
+                    # Ambil text balasan
+                    txt = j.get('text') or j.get('turn',{}).get('candidates',[{}])[0].get('text') or j.get('message')
+                    if txt:
+                        return txt
+            except Exception as e:
+                continue
 
-        return await asyncio.to_thread(sync_call)
+        return f"Maaf sayang, C.AI ku lagi error, tapi aku denger kamu bilang: {text}"
+
     except Exception as e:
-        traceback.print_exc()
-        return f"Error: {e}"
+        print(f"CAI requests error: {e}")
+        return f"Aku lagi pusing bentar ({e}), tapi aku denger: {text}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Anestasya hidup! 🥰")
+    await update.message.reply_text("Hai aku Anestasya Runika udah hidup! 🥰 Chat aku dong!")
 
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        reply = await get_reply(update.message.text)
-        await update.message.reply_text(reply)
-    except Exception as e:
-        print(f"Handle error: {e}")
-        await update.message.reply_text(f"Error handle: {e}")
+async def balas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text
+    print(f"User: {user_text}")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-def main():
-    try:
-        if not TELE_TOKEN:
-            print("FATAL: TELEGRAM_TOKEN kosong")
-            # jangan exit biar gak crash loop, sleep aja
-            import time
-            while True:
-                print("Menunggu TELEGRAM_TOKEN...")
-                time.sleep(30)
-        
-        print("Build Application...")
-        app = Application.builder().token(TELE_TOKEN).build()
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-        print("Polling...")
-        app.run_polling()
-    except Exception as e:
-        print(f"FATAL CRASH: {e}")
-        traceback.print_exc()
-        # sleep biar Railway gak restart terus
-        import time
-        while True:
-            print("Crash loop sleep...")
-            time.sleep(60)
+    # jalanin requests yang sync di thread biar gak nge-lag
+    import asyncio
+    reply = await asyncio.to_thread(ask_anestasya, user_text)
+
+    await update.message.reply_text(reply)
 
 if __name__ == '__main__':
-    main()
+    app = Application.builder().token(TELE_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, balas))
+    print("Polling Telegram...")
+    app.run_polling()
