@@ -1,3 +1,4 @@
 python-telegram-bot==21.7
 requests
 characterai==0.8.0
+websockets==12.0
